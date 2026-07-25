@@ -17,32 +17,26 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             runner: macos-15
-            helper_asset_name: java-task-helper-darwin-aarch64.tar.gz
             proxy_asset: java-lsp-proxy-darwin-aarch64.tar.gz
             bridge_asset: gradle-lsp-bridge-darwin-aarch64.tar.gz
           - target: x86_64-apple-darwin
             runner: macos-15-intel
-            helper_asset_name: java-task-helper-darwin-x86_64.tar.gz
             proxy_asset: java-lsp-proxy-darwin-x86_64.tar.gz
             bridge_asset: gradle-lsp-bridge-darwin-x86_64.tar.gz
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-22.04
-            helper_asset_name: java-task-helper-linux-x86_64.tar.gz
             proxy_asset: java-lsp-proxy-linux-x86_64.tar.gz
             bridge_asset: gradle-lsp-bridge-linux-x86_64.tar.gz
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-22.04-arm
-            helper_asset_name: java-task-helper-linux-aarch64.tar.gz
             proxy_asset: java-lsp-proxy-linux-aarch64.tar.gz
             bridge_asset: gradle-lsp-bridge-linux-aarch64.tar.gz
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
-            helper_asset_name: java-task-helper-windows-x86_64.zip
             proxy_asset: java-lsp-proxy-windows-x86_64.zip
             bridge_asset: gradle-lsp-bridge-windows-x86_64.zip
           - target: aarch64-pc-windows-msvc
             runner: windows-11-arm
-            helper_asset_name: java-task-helper-windows-aarch64.zip
             proxy_asset: java-lsp-proxy-windows-aarch64.zip
             bridge_asset: gradle-lsp-bridge-windows-aarch64.zip
 
@@ -63,20 +57,12 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }} -p java-lsp-proxy -p gradle-lsp-bridge
         shell: bash
 
-      - name: Build task helper binary
-        working-directory: task_helper
-        run: cargo build --release --target ${{ matrix.target }}
-        shell: bash
-
       - name: Package binaries (Unix)
         if: runner.os != 'Windows'
         run: |
           tar -czf ${{ matrix.proxy_asset }} \
             -C target/${{ matrix.target }}/release \
             java-lsp-proxy
-          tar -czf ${{ matrix.helper_asset_name }} \
-            -C target/${{ matrix.target }}/release \
-            java-task-helper
           tar -czf ${{ matrix.bridge_asset }} \
             -C target/${{ matrix.target }}/release \
             gradle-lsp-bridge
@@ -84,8 +70,7 @@ jobs:
       - name: Package binaries (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |          
-          Compress-Archive -Path target/${{ matrix.target }}/release/java-task-helper.exe -DestinationPath ${{ matrix.helper_asset_name }}
+        run: |
           Compress-Archive -Path target/${{ matrix.target }}/release/java-lsp-proxy.exe -DestinationPath ${{ matrix.proxy_asset }}
           Compress-Archive -Path target/${{ matrix.target }}/release/gradle-lsp-bridge.exe -DestinationPath ${{ matrix.bridge_asset }}
 
@@ -94,7 +79,6 @@ jobs:
         with:
           name: binaries-${{ matrix.target }}
           path: |
-            ${{ matrix.helper_asset_name }}
             ${{ matrix.proxy_asset }}
             ${{ matrix.bridge_asset }}
           retention-days: 1

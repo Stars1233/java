@@ -15,7 +15,6 @@ use crate::{
     jdtls::{Jdtls, Lombok, build_jdtls_launch_args, get_jdtls_launcher_from_path},
     language_server::LanguageServer,
     proxy::Proxy,
-    task::TaskHelper,
     util::{path_to_file_uri, path_to_string},
 };
 
@@ -25,7 +24,6 @@ pub struct JdtlsServer {
     pub proxy: Proxy,
     pub jdk: Jdk,
     pub debugger: Debugger,
-    pub task_helper: TaskHelper,
     pub cached_workspace: Option<String>,
 }
 
@@ -37,7 +35,6 @@ impl JdtlsServer {
             proxy: Proxy::new(),
             jdk: Jdk::new(),
             debugger: Debugger::new(),
-            task_helper: TaskHelper::new(),
             cached_workspace: None,
         }
     }
@@ -119,13 +116,6 @@ impl LanguageServer for JdtlsServer {
         {
             println!("Failed to download debugger: {err}");
         };
-
-        if let Err(err) =
-            self.task_helper
-                .get_or_download(language_server_id, &configuration, worktree)
-        {
-            println!("Failed to download task helper: {err}");
-        }
 
         self.cached_workspace = Some(worktree.root_path());
 

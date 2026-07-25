@@ -1,6 +1,5 @@
 ---
 source: tests/support/mod.rs
-assertion_line: 82
 expression: captures
 ---
 - name: _

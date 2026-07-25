@@ -668,10 +668,6 @@ The project includes a `justfile` with common development tasks:
 | `just proxy-build` | Build the proxy binary in debug mode |
 | `just proxy-release` | Build the proxy binary in release mode |
 | `just proxy-install` | Build release proxy and copy it to the extension workdir |
-| `just task-build` | Build the task helper binary in debug mode |
-| `just task-release` | Build the task helper binary in release mode |
-| `just task-install` | Build release task helper and copy it to the extension workdir |
-| `just task-test` | Run task helper tests |
 | `just bridge-build` | Build the gradle-lsp-bridge binary in debug mode |
 | `just bridge-release` | Build the gradle-lsp-bridge binary in release mode |
 | `just bridge-install` | Build release gradle-lsp-bridge and copy it to the extension workdir |
@@ -683,7 +679,7 @@ The project includes a `justfile` with common development tasks:
 
 ### Testing Local Binary Changes
 
-The three native binaries (`java-lsp-proxy` in `proxy/`, `gradle-lsp-bridge` in `gradle-bridge/`, `java-task-helper` in `task_helper/`) are **not** rebuilt when you use "Rebuild Dev Extension" — and by default the extension downloads release binaries from GitHub. There are two ways to run a local build instead.
+The native binaries (`java-lsp-proxy` in `proxy/`, `gradle-lsp-bridge` in `gradle-bridge/`) are **not** rebuilt when you use "Rebuild Dev Extension" — and by default the extension downloads release binaries from GitHub. There are two ways to run a local build instead.
 
 #### Option A: Install into the extension workdir (recommended)
 
@@ -692,7 +688,6 @@ The `*-install` recipes build the release binary and copy it into the extension'
 ```sh
 just proxy-install     # java-lsp-proxy
 just bridge-install    # gradle-lsp-bridge
-just task-install      # java-task-helper
 ```
 
 Each copies to the `bin/` directory of the Zed extension workdir:
@@ -758,14 +753,13 @@ If you have Rust installed on the remote server, clone the repo there and build 
 # On the remote host
 git clone https://github.com/zed-extensions/java.git
 cd java
-cargo build --release -p java-lsp-proxy -p gradle-lsp-bridge -p java-task-helper
-# Binaries are at: <repo>/target/release/{java-lsp-proxy,gradle-lsp-bridge,java-task-helper}
+cargo build --release -p java-lsp-proxy -p gradle-lsp-bridge
+# Binaries are at: <repo>/target/release/{java-lsp-proxy,gradle-lsp-bridge}
 
 # Copy to the remote extensions workdir
 mkdir -p ~/.local/share/zed/remote_extensions/work/java/bin
 cp target/release/java-lsp-proxy \
    target/release/gradle-lsp-bridge \
-   target/release/java-task-helper \
    ~/.local/share/zed/remote_extensions/work/java/bin/
 ```
 
@@ -775,12 +769,11 @@ If you prefer to build on your local machine, cross-compile for the remote targe
 
 ```sh
 # Build for the remote's target
-cargo build --release --target x86_64-unknown-linux-gnu -p java-lsp-proxy -p gradle-lsp-bridge -p java-task-helper
+cargo build --release --target x86_64-unknown-linux-gnu -p java-lsp-proxy -p gradle-lsp-bridge
 # You may need: rustup target add x86_64-unknown-linux-gnu (and a linker in .cargo/config.toml)
 
 # Copy the binaries to the remote server
 scp target/x86_64-unknown-linux-gnu/release/java-lsp-proxy \
-    target/x86_64-unknown-linux-gnu/release/java-task-helper \
     target/x86_64-unknown-linux-gnu/release/gradle-lsp-bridge \
     user@remote:~/java-bins/
 ```

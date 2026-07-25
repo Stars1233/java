@@ -10,7 +10,6 @@ mod jdtls_server;
 mod language_server;
 mod lsp;
 mod proxy;
-mod task;
 mod util;
 
 use std::str::FromStr;
