@@ -201,8 +201,16 @@ fn test_maven_single_module_command_logic() {
         .run();
 
     assert!(
-        stdout.contains("MVN_CALLED: clean compile exec:java -Dexec.mainClass=com.example.Main"),
+        stdout.contains("MVN_CALLED: clean compile exec:exec"),
         "Should run as single module. Got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("-Dexec.executable=java")
+            && stdout.contains("-Dexec.args=-classpath %classpath com.example.Main")
+            && stdout.contains("-Dexec.inheritIo=true")
+            && stdout.contains("-Dexec.longClasspath=true"),
+        "Should launch the main class in a standalone JVM. Got: {}",
         stdout
     );
     assert!(
@@ -211,8 +219,8 @@ fn test_maven_single_module_command_logic() {
         stdout
     );
     assert!(
-        stdout_test
-            .contains("MVN_CALLED: clean test-compile exec:java -Dexec.mainClass=com.example.Main"),
+        stdout_test.contains("MVN_CALLED: clean test-compile exec:exec")
+            && stdout_test.contains("-Dexec.args=-classpath %classpath com.example.Main"),
         "Should run as single module. Got: {}",
         stdout_test
     );
@@ -239,8 +247,13 @@ fn test_maven_multi_module_command_logic() {
         stdout
     );
     assert!(
-        stdout.contains("MVN_CALLED: exec:java -pl module-a"),
+        stdout.contains("MVN_CALLED: exec:exec -pl module-a"),
         "Should run only the submodule. Got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("-Dexec.args=-classpath %classpath com.example.Main"),
+        "Should launch the submodule main class in a standalone JVM. Got: {}",
         stdout
     );
     assert!(
@@ -255,8 +268,13 @@ fn test_maven_multi_module_command_logic() {
         stdout_test
     );
     assert!(
-        stdout_test.contains("MVN_CALLED: exec:java -pl module-a"),
+        stdout_test.contains("MVN_CALLED: exec:exec -pl module-a"),
         "Should run only the submodule. Got: {}",
+        stdout_test
+    );
+    assert!(
+        stdout_test.contains("-Dexec.args=-classpath %classpath com.example.Main"),
+        "Should launch the submodule test class in a standalone JVM. Got: {}",
         stdout_test
     );
     assert!(
@@ -281,7 +299,7 @@ fn test_maven_nested_module_command_logic() {
         stdout
     );
     assert!(
-        stdout.contains("MVN_CALLED: exec:java -pl nested/module-b"),
+        stdout.contains("MVN_CALLED: exec:exec -pl nested/module-b"),
         "Should run only the nested submodule. Got: {}",
         stdout
     );
@@ -372,7 +390,7 @@ fn test_maven_single_level_package_logic() {
         .run();
 
     assert!(
-        stdout.contains("-Dexec.mainClass=example.Main"),
+        stdout.contains("-Dexec.args=-classpath %classpath example.Main"),
         "Should include the single-level package in Maven. Got: {}",
         stdout
     );
@@ -384,7 +402,7 @@ fn test_maven_default_package_command_logic() {
     let stdout = project.task("java-main").package("").class("Main").run();
 
     assert!(
-        stdout.contains("-Dexec.mainClass=Main"),
+        stdout.contains("-Dexec.args=-classpath %classpath Main"),
         "Should not include leading dot for default package in Maven. Got: {}",
         stdout
     );
