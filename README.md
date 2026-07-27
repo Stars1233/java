@@ -39,8 +39,9 @@ Here is a common `settings.json` including the above mentioned configurations:
       "min_memory": "1G",   // default: "1G"
       "max_memory": "2G",   // default: unset (no -Xmx limit)
 
-      // Controls when to check for updates for JDTLS, Lombok, and Debugger
-      // - "always" (default): Always check for and download the latest version
+      // Controls when to check for updates for managed components
+      // - "always" (default): Check for the latest version at most once every 24 hours
+      //   and reuse the last successfully resolved version between checks
       // - "once": Check for updates only if no local installation exists
       // - "never": Never check for updates, only use existing local installations (errors if missing)
       //
@@ -95,6 +96,10 @@ Configuration, when you need it, goes under the `gradle-language-server` languag
       "gradleHome": null,           // a local Gradle installation directory
       "gradleUserHome": null,       // overrides GRADLE_USER_HOME
       "gradle_jvm_arguments": null, // e.g. "-Xmx2G" for the Gradle build
+
+      // Uses the same always/once/never policy as JDTLS. In "always" mode,
+      // successful version checks are cached for 24 hours.
+      "check_updates": "always",
 
       // Path to a locally built gradle-lsp-bridge binary, overriding the
       // managed download. Primarily for development (see Developing Locally).
@@ -623,7 +628,7 @@ If changes are not picked up, clean JDTLS' cache (from a java file run the task 
 
 ## Architecture Note
 
-The extension uses two native binaries, both automatically downloaded from the [extension repository releases](https://github.com/zed-extensions/java/releases) and requiring no user configuration:
+The extension uses two native binaries, both automatically downloaded from the [extension repository releases](https://github.com/zed-extensions/java/releases) and requiring no user configuration. Their managed versions are always bound to the extension version, so they do not use the 24-hour version cache and are not affected by `check_updates`. Explicit path settings and root-level development binaries installed with the `*-install` recipes still override the managed binaries:
 
 - **`java-lsp-proxy`** wraps the JDTLS process, enabling the extension to communicate with JDTLS for features like debug class resolution and classpath queries.
 - **`gradle-lsp-bridge`** bridges Zed to the Gradle Language Server and drives the bundled `gradle-server` over gRPC to supply the resolved build model (see [Gradle Build Files](#gradle-build-files)). It pulls in an async/gRPC stack, so it is kept as a separate binary from the deliberately lean JDTLS proxy.

@@ -1,7 +1,8 @@
 use std::{
     env::current_dir,
-    fs::{metadata, read_dir},
+    fs::{self, metadata, read_dir},
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use sha1::{Digest, Sha1};
@@ -20,7 +21,7 @@ use crate::{
     jdk::Jdk,
     util::{
         create_path_if_not_exists, get_curr_dir, get_java_exec_name, get_java_executable,
-        get_java_major_version, get_latest_versions_from_tag, mark_checked_once, path_to_string,
+        get_java_major_version, get_latest_versions_from_tag, path_to_string,
         remove_all_files_except,
     },
 };
@@ -31,8 +32,6 @@ const LOMBOK_INSTALL_PATH: &str = "lombok";
 const LOMBOK_REPO: &str = "projectlombok/lombok";
 
 const JAVA_VERSION_ERROR: &str = "JDTLS requires at least Java version 21 to run. You can either specify a different JDK to use by configuring lsp.jdtls.settings.java_home to point to a different JDK, or set lsp.jdtls.settings.jdk_auto_download to true to let the extension automatically download one for you.";
-const JDTLS_VERSION_ERROR: &str = "No version to fallback to";
-
 // --- Jdtls Component ---
 
 pub struct Jdtls {
@@ -50,12 +49,15 @@ impl Downloadable for Jdtls {
 
     fn find_local(&self) -> Option<PathBuf> {
         let prefix = PathBuf::from(JDTLS_INSTALL_PATH);
+        let binary_name = get_binary_name();
+        let config_directory = get_shared_config_directory_name();
         read_dir(&prefix)
             .map(|entries| {
                 entries
                     .filter_map(Result::ok)
                     .map(|entry| entry.path())
                     .filter(|path| path.is_dir())
+                    .filter(|path| is_complete_jdtls_install(path, binary_name, config_directory))
                     .filter_map(|path| {
                         let created_time = metadata(&path).and_then(|meta| meta.created()).ok()?;
                         Some((path, created_time))
@@ -79,62 +81,61 @@ impl Downloadable for Jdtls {
 
     fn download(
         &mut self,
-        _version: &str,
+        version: &str,
         language_server_id: &LanguageServerId,
-        worktree: &Worktree,
+        _worktree: &Worktree,
     ) -> zed::Result<PathBuf> {
+        let prefix = PathBuf::from(JDTLS_INSTALL_PATH);
+        let binary_name = get_binary_name();
+        let config_directory = get_shared_config_directory_name();
+        if let Some(build_path) =
+            installed_jdtls_version(&prefix, version, binary_name, config_directory)
+        {
+            self.cached_path = Some(build_path.clone());
+            return Ok(build_path);
+        }
+
+        let build_path = prefix.join(version);
+
         set_language_server_installation_status(
             language_server_id,
-            &LanguageServerInstallationStatus::CheckingForUpdate,
+            &LanguageServerInstallationStatus::Downloading,
         );
+        let latest_version_build = download_jdtls_milestone(version)?.trim_end().to_string();
 
-        let (last, second_last) = get_latest_versions_from_tag(JDTLS_REPO, worktree)
-            .map_err(|err| format!("Failed to fetch JDTLS versions from {JDTLS_REPO}: {err}"))?;
-
-        let (latest_version, latest_version_build) = download_jdtls_milestone(last.as_ref())
-            .map_or_else(
-                |_| {
-                    second_last
-                        .ok_or(JDTLS_VERSION_ERROR.to_string())
-                        .and_then(|fallback| {
-                            download_jdtls_milestone(&fallback)
-                                .map(|milestone| (fallback, milestone.trim_end().to_string()))
-                        })
-                },
-                |milestone| Ok((last, milestone.trim_end().to_string())),
-            )?;
-
-        let prefix = PathBuf::from(JDTLS_INSTALL_PATH);
-        let build_directory = latest_version_build.replace(".tar.gz", "");
-        let build_path = prefix.join(&build_directory);
-        let binary_path = build_path.join("bin").join(get_binary_name());
-
-        if !metadata(&binary_path).is_ok_and(|stat| stat.is_file()) {
-            set_language_server_installation_status(
-                language_server_id,
-                &LanguageServerInstallationStatus::Downloading,
-            );
-            let download_url = format!(
-                "https://www.eclipse.org/downloads/download.php?file=/jdtls/milestones/{latest_version}/{latest_version_build}"
-            );
+        let download_url = format!(
+            "https://www.eclipse.org/downloads/download.php?file=/jdtls/milestones/{version}/{latest_version_build}"
+        );
+        let staging_path = jdtls_staging_path(&prefix, version)?;
+        let staging_binary_path = jdtls_binary_path(&staging_path, binary_name);
+        let staged = (|| {
             download_file(
                 &download_url,
-                path_to_string(build_path.clone())
-                    .map_err(|err| format!("Invalid JDTLS build path {build_path:?}: {err}"))?
+                path_to_string(staging_path.clone())
+                    .map_err(|err| format!("Invalid JDTLS staging path {staging_path:?}: {err}"))?
                     .as_str(),
                 DownloadedFileType::GzipTar,
             )
             .map_err(|err| format!("Failed to download JDTLS from {download_url}: {err}"))?;
             make_file_executable(
-                path_to_string(&binary_path)
-                    .map_err(|err| format!("Invalid JDTLS binary path {binary_path:?}: {err}"))?
+                path_to_string(&staging_binary_path)
+                    .map_err(|err| {
+                        format!("Invalid JDTLS binary path {staging_binary_path:?}: {err}")
+                    })?
                     .as_str(),
             )
-            .map_err(|err| format!("Failed to make JDTLS executable at {binary_path:?}: {err}"))?;
+            .map_err(|err| {
+                format!("Failed to make JDTLS executable at {staging_binary_path:?}: {err}")
+            })?;
 
-            let _ = remove_all_files_except(prefix, build_directory.as_str());
-            let _ = mark_checked_once(JDTLS_INSTALL_PATH, &latest_version);
+            promote_staged_jdtls(&staging_path, &build_path, binary_name, config_directory)
+        })();
+        if let Err(err) = staged {
+            let _ = fs::remove_dir_all(&staging_path);
+            return Err(err);
         }
+
+        let _ = remove_old_jdtls_installations(&prefix, version);
 
         self.cached_path = Some(build_path.clone());
         Ok(build_path)
@@ -214,9 +215,7 @@ impl Downloadable for Lombok {
                 DownloadedFileType::Uncompressed,
             )
             .map_err(|err| format!("Failed to download Lombok from {download_url}: {err}"))?;
-
             let _ = remove_all_files_except(prefix, jar_name.as_str());
-            let _ = mark_checked_once(LOMBOK_INSTALL_PATH, version);
         }
 
         self.cached_path = Some(jar_path.clone());
@@ -363,6 +362,110 @@ fn download_jdtls_milestone(version: &str) -> zed::Result<String> {
     .map_err(|err| format!("Failed to get latest version's build (malformed response): {err}"))
 }
 
+/// Return the launcher path expected inside an extracted JDTLS installation.
+fn jdtls_binary_path(install_path: &Path, binary_name: &str) -> PathBuf {
+    install_path.join("bin").join(binary_name)
+}
+
+/// Return the tag-specific installation path only when all required JDTLS files are present.
+fn installed_jdtls_version(
+    prefix: &Path,
+    version: &str,
+    binary_name: &str,
+    config_directory: &str,
+) -> Option<PathBuf> {
+    let install_path = prefix.join(version);
+    is_complete_jdtls_install(&install_path, binary_name, config_directory).then_some(install_path)
+}
+
+/// Validate the launcher, platform configuration, and Equinox launcher needed to start JDTLS.
+fn is_complete_jdtls_install(
+    install_path: &Path,
+    binary_name: &str,
+    config_directory: &str,
+) -> bool {
+    jdtls_binary_path(install_path, binary_name).is_file()
+        && install_path.join(config_directory).is_dir()
+        && find_equinox_launcher(install_path).is_ok()
+}
+
+/// Select an unused hidden sibling directory for extracting a JDTLS archive
+/// before it is promoted to the tag-specific installation directory.
+fn jdtls_staging_path(prefix: &Path, version: &str) -> zed::Result<PathBuf> {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| format!("System clock is before the Unix epoch: {err}"))?
+        .as_nanos();
+    let version_hash = get_sha1_hex(version);
+
+    (0..16)
+        .map(|attempt| prefix.join(format!(".{version_hash}.{nonce}.{attempt}.tmp")))
+        .find(|path| !path.exists())
+        .ok_or_else(|| format!("Failed to allocate a JDTLS staging directory for {version}"))
+}
+
+/// Validate and atomically promote a staged JDTLS installation.
+///
+/// A concurrently completed installation wins; its redundant staging directory
+/// is removed instead of replacing the valid final directory.
+fn promote_staged_jdtls(
+    staging_path: &Path,
+    install_path: &Path,
+    binary_name: &str,
+    config_directory: &str,
+) -> zed::Result<()> {
+    if !is_complete_jdtls_install(staging_path, binary_name, config_directory) {
+        return Err(format!(
+            "Downloaded JDTLS installation is incomplete at {staging_path:?}"
+        ));
+    }
+
+    if is_complete_jdtls_install(install_path, binary_name, config_directory) {
+        fs::remove_dir_all(staging_path)
+            .map_err(|err| format!("Failed to remove redundant JDTLS staging directory: {err}"))?;
+        return Ok(());
+    }
+
+    if install_path.exists() {
+        fs::remove_dir_all(install_path)
+            .map_err(|err| format!("Failed to remove incomplete JDTLS installation: {err}"))?;
+    }
+
+    match fs::rename(staging_path, install_path) {
+        Ok(()) => Ok(()),
+        Err(_) if is_complete_jdtls_install(install_path, binary_name, config_directory) => {
+            fs::remove_dir_all(staging_path)
+                .map_err(|err| format!("Failed to remove redundant JDTLS staging directory: {err}"))
+        }
+        Err(err) => Err(format!(
+            "Failed to promote JDTLS staging directory {staging_path:?}: {err}"
+        )),
+    }
+}
+
+/// Remove older completed JDTLS version directories while preserving the
+/// selected version, update records, and hidden in-progress staging directories.
+fn remove_old_jdtls_installations(prefix: &Path, version: &str) -> zed::Result<()> {
+    let entries = fs::read_dir(prefix)
+        .map_err(|err| format!("Failed to read JDTLS install directory {prefix:?}: {err}"))?;
+
+    for entry in entries.filter_map(Result::ok) {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if file_name != version
+            && !file_name.starts_with('.')
+            && entry.file_type().is_ok_and(|file_type| file_type.is_dir())
+            && let Err(err) = fs::remove_dir_all(entry.path())
+        {
+            println!("Failed to remove old JDTLS installation: {err}");
+        }
+    }
+
+    Ok(())
+}
+
 fn find_equinox_launcher(jdtls_base_directory: &Path) -> Result<PathBuf, String> {
     let plugins_dir = jdtls_base_directory.join("plugins");
 
@@ -439,13 +542,128 @@ fn get_sha1_hex(input: &str) -> String {
     hex::encode(result)
 }
 
-fn get_shared_config_path(jdtls_base_directory: &Path) -> PathBuf {
-    let config_to_use = match current_platform() {
+/// Return the JDTLS configuration directory bundled for the current platform.
+fn get_shared_config_directory_name() -> &'static str {
+    match current_platform() {
         (Os::Mac, Architecture::Aarch64) => "config_mac_arm",
         (Os::Mac, _) => "config_mac",
         (Os::Linux, Architecture::Aarch64) => "config_linux_arm",
         (Os::Linux, _) => "config_linux",
         (Os::Windows, _) => "config_win",
-    };
-    jdtls_base_directory.join(config_to_use)
+    }
+}
+
+fn get_shared_config_path(jdtls_base_directory: &Path) -> PathBuf {
+    jdtls_base_directory.join(get_shared_config_directory_name())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::*;
+    use crate::util::{UPDATE_CHECK_MARKER, fresh_cached_version, record_successful_update_check};
+
+    static NEXT_TEMP_PATH: AtomicU64 = AtomicU64::new(0);
+
+    fn temporary_jdtls_prefix(test_name: &str) -> PathBuf {
+        let id = NEXT_TEMP_PATH.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "zed-java-jdtls-{}-{id}-{test_name}",
+            std::process::id()
+        ))
+    }
+
+    fn create_complete_install(install_path: &Path) {
+        let binary_path = jdtls_binary_path(install_path, "jdtls");
+        fs::create_dir_all(binary_path.parent().unwrap()).unwrap();
+        fs::write(binary_path, "").unwrap();
+        fs::create_dir_all(install_path.join("config_linux")).unwrap();
+        let launcher = install_path
+            .join("plugins")
+            .join("org.eclipse.equinox.launcher_1.0.0.jar");
+        fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+        fs::write(launcher, "").unwrap();
+    }
+
+    #[test]
+    fn incomplete_jdtls_install_is_not_reused() {
+        let prefix = temporary_jdtls_prefix("incomplete");
+        let version = "1.50.0";
+        let install_path = prefix.join(version);
+
+        let binary_path = jdtls_binary_path(&install_path, "jdtls");
+        fs::create_dir_all(binary_path.parent().unwrap()).unwrap();
+        fs::write(&binary_path, "").unwrap();
+
+        assert_eq!(
+            installed_jdtls_version(&prefix, version, "jdtls", "config_linux"),
+            None
+        );
+
+        create_complete_install(&install_path);
+        assert_eq!(
+            installed_jdtls_version(&prefix, version, "jdtls", "config_linux"),
+            Some(install_path)
+        );
+
+        let _ = fs::remove_dir_all(prefix);
+    }
+
+    #[test]
+    fn complete_staging_install_replaces_incomplete_final_directory() {
+        let prefix = temporary_jdtls_prefix("promotion");
+        let install_path = prefix.join("1.50.0");
+        let staging_path = prefix.join(".staging.tmp");
+        fs::create_dir_all(&install_path).unwrap();
+        fs::write(install_path.join("partial"), "").unwrap();
+        create_complete_install(&staging_path);
+
+        promote_staged_jdtls(&staging_path, &install_path, "jdtls", "config_linux").unwrap();
+
+        assert!(!staging_path.exists());
+        assert!(is_complete_jdtls_install(
+            &install_path,
+            "jdtls",
+            "config_linux"
+        ));
+        assert!(!install_path.join("partial").exists());
+        let _ = fs::remove_dir_all(prefix);
+    }
+
+    #[test]
+    fn cached_tag_resolves_complete_install_without_build_metadata() {
+        let prefix = temporary_jdtls_prefix("cache-flow");
+        let version = "1.50.0";
+        let update_check_path = prefix.join(UPDATE_CHECK_MARKER);
+        record_successful_update_check(&update_check_path, version).unwrap();
+        let cached_version = fresh_cached_version(&update_check_path).unwrap();
+        let install_path = prefix.join(version);
+        create_complete_install(&install_path);
+
+        assert_eq!(cached_version, version);
+        assert_eq!(
+            installed_jdtls_version(&prefix, &cached_version, "jdtls", "config_linux"),
+            Some(install_path)
+        );
+        let _ = fs::remove_dir_all(prefix);
+    }
+
+    #[test]
+    fn jdtls_cleanup_preserves_active_staging_directories() {
+        let prefix = temporary_jdtls_prefix("cleanup");
+        let current = prefix.join("1.50.0");
+        let old = prefix.join("1.49.0");
+        let staging = prefix.join(".staging.tmp");
+        fs::create_dir_all(&current).unwrap();
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir_all(&staging).unwrap();
+
+        remove_old_jdtls_installations(&prefix, "1.50.0").unwrap();
+
+        assert!(current.exists());
+        assert!(!old.exists());
+        assert!(staging.exists());
+        let _ = fs::remove_dir_all(prefix);
+    }
 }

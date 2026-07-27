@@ -14,8 +14,8 @@ use crate::{
     downloadable::Downloadable,
     lsp,
     util::{
-        ArgsStringOrList, create_path_if_not_exists, get_curr_dir, mark_checked_once,
-        path_to_string, should_use_local_or_download,
+        ArgsStringOrList, create_path_if_not_exists, get_curr_dir, path_to_string,
+        record_successful_update_check, should_use_local_or_download, update_check_path,
     },
 };
 
@@ -114,6 +114,11 @@ impl Debugger {
             return Ok(path.clone());
         }
 
+        if fs::metadata(&jar_path).is_ok_and(|stat| stat.is_file()) {
+            self.plugin_path = Some(jar_path.clone());
+            return Ok(jar_path);
+        }
+
         create_path_if_not_exists(prefix)
             .map_err(|err| format!("Failed to create debugger directory '{prefix}': {err}"))?;
 
@@ -127,8 +132,10 @@ impl Debugger {
             format!("Failed to download java-debug fork from {JAVA_DEBUG_PLUGIN_FORK_URL}: {err}")
         })?;
 
-        // Mark the downloaded version for "Once" mode tracking
-        let _ = mark_checked_once(DEBUGGER_INSTALL_PATH, latest_version);
+        let _ = record_successful_update_check(
+            &update_check_path(DEBUGGER_INSTALL_PATH),
+            latest_version,
+        );
 
         self.plugin_path = Some(jar_path.clone());
         Ok(jar_path)
@@ -234,8 +241,10 @@ impl Debugger {
             )
             .map_err(|err| format!("Failed to download {url}: {err}"))?;
 
-            // Mark the downloaded version for "Once" mode tracking
-            let _ = mark_checked_once(DEBUGGER_INSTALL_PATH, latest_version);
+            let _ = record_successful_update_check(
+                &update_check_path(DEBUGGER_INSTALL_PATH),
+                latest_version,
+            );
         }
 
         self.plugin_path = Some(jar_path.clone());
@@ -445,9 +454,13 @@ impl Downloadable for Debugger {
             return Ok(path);
         }
 
-        if let Some(path) =
-            should_use_local_or_download(configuration, self.find_local(), Self::INSTALL_PATH)
-                .map_err(|err| format!("Failed to resolve debugger installation: {err}"))?
+        if let Some(path) = should_use_local_or_download(
+            configuration,
+            self.find_local(),
+            Self::INSTALL_PATH,
+            &self.update_check_path(),
+        )
+        .map_err(|err| format!("Failed to resolve debugger installation: {err}"))?
         {
             self.plugin_path = Some(path.clone());
             return Ok(path);

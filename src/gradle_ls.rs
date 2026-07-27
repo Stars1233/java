@@ -10,7 +10,7 @@ use zed_extension_api::{
 
 use crate::{
     downloadable::Downloadable,
-    util::{create_path_if_not_exists, mark_checked_once, remove_all_files_except},
+    util::{create_path_if_not_exists, remove_all_files_except},
 };
 
 const INSTALL_PATH: &str = "gradle-ls";
@@ -111,7 +111,6 @@ impl Downloadable for GradleLs {
 
         // Remove old versions
         let _ = remove_all_files_except(INSTALL_PATH, version);
-        let _ = mark_checked_once(INSTALL_PATH, version);
 
         set_language_server_installation_status(
             language_server_id,

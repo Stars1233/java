@@ -8,7 +8,7 @@ use zed_extension_api::{
 
 use crate::{
     downloadable::Downloadable,
-    util::{get_curr_dir, mark_checked_once, path_to_string, remove_all_files_except},
+    util::{get_curr_dir, path_to_string, remove_all_files_except},
 };
 
 const JDK_DIR_ERROR: &str = "Failed to read into JDK install directory";
@@ -113,7 +113,6 @@ impl Downloadable for Jdk {
             .map_err(|err| format!("Failed to download Corretto JDK from {download_url}: {err}"))?;
 
             let _ = remove_all_files_except(&jdk_path, version);
-            let _ = mark_checked_once(Self::INSTALL_PATH, version);
         }
 
         self.cached_path = Some(install_path.clone());
