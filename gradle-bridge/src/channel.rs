@@ -78,7 +78,7 @@ pub fn parse_publish_diagnostics(raw: &[u8]) -> Option<(String, Vec<Value>)> {
 
 /// Build the `uri -> [diagnostic]` map for a build-evaluation failure.
 ///
-/// `error` is the top-level message (typically the gRPC `Status` message or a
+/// `error` is the top-level message (typically a gradle-server build error or a
 /// `compatibility_check_error`); `causes` are appended line by line. The target
 /// file and line/column are parsed from the Gradle message when present
 /// (`build file '…': N:` and `@ line N, column C`), otherwise the diagnostic is

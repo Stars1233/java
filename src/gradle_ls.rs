@@ -1,11 +1,11 @@
 use std::{
-    fs::{metadata, read_dir},
-    path::PathBuf,
+    fs::metadata,
+    path::{Path, PathBuf},
 };
 
 use zed_extension_api::{
-    self as zed, DownloadedFileType, GithubReleaseOptions, LanguageServerId,
-    LanguageServerInstallationStatus, Worktree, set_language_server_installation_status,
+    self as zed, DownloadedFileType, LanguageServerId, LanguageServerInstallationStatus, Worktree,
+    serde_json::Value, set_language_server_installation_status,
 };
 
 use crate::{
@@ -14,7 +14,7 @@ use crate::{
 };
 
 const INSTALL_PATH: &str = "gradle-ls";
-const GITHUB_REPO: &str = "microsoft/vscode-gradle";
+const SUPPORTED_VERSION: &str = "3.18.0";
 const VSIX_PUBLISHER: &str = "vscjava";
 const VSIX_EXTENSION: &str = "vscode-gradle";
 
@@ -32,13 +32,7 @@ impl Downloadable for GradleLs {
     const INSTALL_PATH: &'static str = INSTALL_PATH;
 
     fn find_local(&self) -> Option<PathBuf> {
-        let prefix = PathBuf::from(INSTALL_PATH);
-        read_dir(&prefix)
-            .ok()?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
-            .find(|path| path.join("lib").is_dir())
+        find_supported_installation(Path::new(INSTALL_PATH))
     }
 
     fn loaded(&self) -> bool {
@@ -46,17 +40,18 @@ impl Downloadable for GradleLs {
     }
 
     fn fetch_latest_version(&self, _worktree: &Worktree) -> zed::Result<String> {
-        let release = zed::latest_github_release(
-            GITHUB_REPO,
-            GithubReleaseOptions {
-                require_assets: false,
-                pre_release: false,
-            },
-        )
-        .map_err(|err| {
-            format!("Failed to fetch latest Gradle LS release from {GITHUB_REPO}: {err}")
-        })?;
-        Ok(release.version)
+        Ok(SUPPORTED_VERSION.to_string())
+    }
+
+    fn version_for_download(
+        &self,
+        _language_server_id: &LanguageServerId,
+        _configuration: &Option<Value>,
+        _worktree: &Worktree,
+    ) -> zed::Result<(String, bool)> {
+        // The bridge protocol is coupled to vscode-gradle 3.18. Do not allow
+        // the shared update-check cache to substitute an incompatible version.
+        Ok((SUPPORTED_VERSION.to_string(), false))
     }
 
     fn download(
@@ -119,5 +114,38 @@ impl Downloadable for GradleLs {
 
         self.cached_path = Some(version_dir.clone());
         Ok(version_dir)
+    }
+}
+
+fn find_supported_installation(install_path: &Path) -> Option<PathBuf> {
+    let version_dir = install_path.join(SUPPORTED_VERSION);
+    version_dir.join("lib").is_dir().then_some(version_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    fn temp_install_path() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("gradle-ls-version-test-{nonce:x}"))
+    }
+
+    #[test]
+    fn local_installation_only_accepts_supported_version() {
+        let install_path = temp_install_path();
+        std::fs::create_dir_all(install_path.join("3.17.0/lib")).unwrap();
+        assert_eq!(find_supported_installation(&install_path), None);
+
+        let supported = install_path.join(SUPPORTED_VERSION);
+        std::fs::create_dir_all(supported.join("lib")).unwrap();
+        assert_eq!(find_supported_installation(&install_path), Some(supported));
+
+        std::fs::remove_dir_all(install_path).unwrap();
     }
 }

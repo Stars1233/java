@@ -1,10 +1,9 @@
-//! Generated gRPC bindings for the shipped `gradle-server` contract.
+//! Generated protobuf messages for the shipped `gradle-server` contract.
 //!
-//! The contents of [`gradle`] are produced by `prost`/`tonic` from
-//! `proto/gradle.proto` (a verbatim copy of the proto embedded in
-//! `gradle-server.jar`) and committed under `src/gen/`, so the build needs no
-//! `protoc`. See `proto/gradle.proto` for regeneration instructions.
-#[allow(clippy::all, clippy::pedantic, missing_docs)]
+//! The contents of [`gradle`] mirror `proto/gradle.proto`, adapted from the
+//! schema embedded in `gradle-server.jar`. The committed message types keep
+//! protobuf code generation out of normal builds.
+#[allow(clippy::all, clippy::pedantic, dead_code, missing_docs)]
 pub mod gradle {
     include!("gen/gradle.rs");
 }

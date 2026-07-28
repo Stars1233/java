@@ -64,7 +64,7 @@ Here is a common `settings.json` including the above mentioned configurations:
 
 For **Groovy** build scripts (`.gradle`) the extension runs Microsoft's [Gradle Language Server](https://github.com/microsoft/vscode-gradle), giving you completions for Gradle DSL closures, plugin-contributed blocks (e.g. `java {}`, `application {}`), Maven Central dependency coordinates, and syntax diagnostics.
 
-To resolve the *plugin-aware* parts of the model (which plugins are applied, the closures/methods they contribute, and the script classpath), the language server needs the resolved build model. The extension obtains this exactly the way the VS Code Gradle extension does: it drives the bundled `gradle-server` over gRPC via a small native binary, `gradle-lsp-bridge`. The bridge keeps a single `gradle-server` process (and its Gradle daemon) warm for the lifetime of the session, so re-syncs after a build-file save are fast. Both the language server and the bridge are downloaded and managed automatically — no configuration is required.
+To resolve the *plugin-aware* parts of the model (which plugins are applied, the closures/methods they contribute, and the script classpath), the language server needs the resolved build model. The extension obtains this exactly the way vscode-gradle 3.18 does: a small native binary, `gradle-lsp-bridge`, drives the bundled `gradle-server` over JSON-RPC using a named pipe on Windows or a Unix-domain socket on Unix. Build-model messages are protobuf-encoded and carried as base64 payloads inside the JSON-RPC messages. The bridge keeps a single `gradle-server` process (and its Gradle daemon) warm for the lifetime of the session, so re-syncs after a build-file save are fast. Both the language server and the bridge are downloaded and managed automatically — no configuration is required.
 
 ### Kotlin DSL (`.gradle.kts`)
 
@@ -631,7 +631,7 @@ If changes are not picked up, clean JDTLS' cache (from a java file run the task 
 The extension uses two native binaries, both automatically downloaded from the [extension repository releases](https://github.com/zed-extensions/java/releases) and requiring no user configuration. Their managed versions are always bound to the extension version, so they do not use the 24-hour version cache and are not affected by `check_updates`. Explicit path settings and root-level development binaries installed with the `*-install` recipes still override the managed binaries:
 
 - **`java-lsp-proxy`** wraps the JDTLS process, enabling the extension to communicate with JDTLS for features like debug class resolution and classpath queries.
-- **`gradle-lsp-bridge`** bridges Zed to the Gradle Language Server and drives the bundled `gradle-server` over gRPC to supply the resolved build model (see [Gradle Build Files](#gradle-build-files)). It pulls in an async/gRPC stack, so it is kept as a separate binary from the deliberately lean JDTLS proxy.
+- **`gradle-lsp-bridge`** bridges Zed to the Gradle Language Server and drives vscode-gradle 3.18's bundled `gradle-server` over JSON-RPC using a named pipe on Windows or a Unix-domain socket on Unix. Protobuf-encoded build-model messages are carried as base64 payloads inside JSON-RPC (see [Gradle Build Files](#gradle-build-files)). It is kept as a separate binary from the deliberately lean JDTLS proxy.
 
 ## Developing Locally
 
@@ -730,7 +730,7 @@ just proxy-release     # or: just bridge-release
 
 When a path setting is provided, the extension uses that binary as-is and skips the managed download entirely — so there's no need to set `check_updates`. Rebuild and restart the language server to pick up changes.
 
-> **Note:** The gRPC bindings the bridge uses are committed under `gradle-bridge/src/gen/`, so building it needs no `protoc`. They are regenerated only when the bundled Gradle Language Server's `gradle.proto` contract changes — see the header of `gradle-bridge/proto/gradle.proto`.
+> **Note:** The bridge's protobuf message definitions mirror vscode-gradle 3.18's bundled `gradle.proto` contract. The schema is retained in `gradle-bridge/proto/gradle.proto`, with the corresponding Rust message types under `gradle-bridge/src/gen/`.
 
 ### Remote Development (SSH)
 

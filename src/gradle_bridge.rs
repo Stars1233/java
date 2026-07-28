@@ -22,7 +22,7 @@ const GITHUB_REPO: &str = "zed-extensions/java";
 
 /// Downloads and locates the `gradle-lsp-bridge` binary — the native process
 /// that bridges Zed to the Gradle Language Server and drives the real
-/// `gradle-server.jar` over gRPC. Mirrors [`crate::proxy::Proxy`], but resolves
+/// `gradle-server.jar` over JSON-RPC. Mirrors [`crate::proxy::Proxy`], but resolves
 /// its own asset name so the two binaries can be downloaded independently from
 /// the shared release.
 pub struct GradleBridge;

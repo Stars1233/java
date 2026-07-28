@@ -51,8 +51,8 @@ jobs:
 
       # Build both native binaries from the workspace root. Selecting the two
       # packages explicitly keeps the WASM extension crate (`zed_java`, a
-      # cdylib) out of the native target build. The gradle-lsp-bridge gRPC
-      # bindings are committed, so no protoc toolchain is needed here.
+      # cdylib) out of the native target build. The Gradle bridge implements
+      # vscode-gradle 3.18's JSON-RPC transport over platform-local IPC.
       - name: Build binaries
         run: cargo build --release --target ${{ matrix.target }} -p java-lsp-proxy -p gradle-lsp-bridge
         shell: bash

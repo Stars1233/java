@@ -1,18 +1,14 @@
-// Source of truth: this file is a verbatim copy of `gradle.proto` embedded
-// inside the shipped `gradle-server.jar` (vscode-gradle / package
-// `com.github.badsyntax.gradle`), extracted with:
+// Message schema adapted from `gradle.proto` embedded in vscode-gradle 3.18's
+// shipped `gradle-server.jar` (package `com.github.badsyntax.gradle`), extracted
+// with:
 //
 //     unzip -p gradle-server.jar gradle.proto
 //
-// The Rust bindings in `src/gen/gradle.rs` are generated from this file and
-// COMMITTED, so neither CI nor contributors need `protoc`. When Microsoft ships
-// a new gradle-server contract, re-extract this proto and regenerate:
-//
-//     # from gradle-bridge/, with protoc on PATH:
-//     cargo run --quiet --bin gen-proto   # (throwaway tonic-build helper), or
-//     protoc + tonic-build as documented in the build notes
-//
-// then commit both this file and the regenerated `src/gen/gradle.rs`.
+// vscode-gradle 3.18 transports these protobuf messages as base64 payloads
+// inside JSON-RPC over a named pipe on Windows or a Unix-domain socket on Unix.
+// RPC service declarations are intentionally omitted because JSON-RPC defines
+// the transport. The corresponding Rust message types live in
+// `src/gen/gradle.rs`.
 //
 syntax = "proto3";
 
@@ -21,14 +17,6 @@ option java_package = "com.github.badsyntax.gradle";
 option java_outer_classname = "GradleProto";
 
 package gradle;
-
-service Gradle {
-  rpc GetBuild(GetBuildRequest) returns (stream GetBuildReply) {}
-  rpc RunBuild(RunBuildRequest) returns (stream RunBuildReply) {}
-  rpc CancelBuild(CancelBuildRequest) returns (CancelBuildReply) {}
-  rpc CancelBuilds(CancelBuildsRequest) returns (CancelBuildsReply) {}
-  rpc executeCommand(ExecuteCommandRequest) returns (ExecuteCommandReply) {}
-}
 
 message GetBuildRequest {
   string project_dir = 1;
@@ -46,6 +34,18 @@ message GetBuildReply {
     Environment environment = 5;
     string compatibility_check_error = 6;
   }
+}
+
+message GetProjectDependenciesRequest {
+  string project_dir = 1;
+  string project_path = 2;
+  string cancellation_key = 3;
+  GradleConfig gradle_config = 4;
+  bool show_output_colors = 5;
+}
+
+message GetProjectDependenciesReply {
+  DependencyItem dependency_item = 1;
 }
 
 message GetBuildResult {
@@ -66,19 +66,19 @@ message DependencyItem {
   repeated DependencyItem children = 3;
 }
 
-message GrpcGradleClosure {
+message GradleClosureProto {
   string name = 1;
-  repeated GrpcGradleMethod methods = 2;
-  repeated GrpcGradleField fields = 3;
+  repeated GradleMethodProto methods = 2;
+  repeated GradleFieldProto fields = 3;
 }
 
-message GrpcGradleMethod {
+message GradleMethodProto {
   string name = 1;
   repeated string parameterTypes = 2;
   bool deprecated = 3;
 }
 
-message GrpcGradleField {
+message GradleFieldProto {
   string name = 1;
   bool deprecated = 2;
 }
@@ -142,7 +142,7 @@ message GradleProject {
   string projectPath = 4;
   DependencyItem dependencyItem = 5;
   repeated string plugins = 6;
-  repeated GrpcGradleClosure pluginClosures = 7;
+  repeated GradleClosureProto pluginClosures = 7;
   repeated string scriptClasspaths = 8;
 }
 

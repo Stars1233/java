@@ -69,7 +69,7 @@ impl LanguageServer for GradleLsServer {
         }
 
         // Forward Gradle distribution settings to the bridge (read from the
-        // process environment, threaded into the gRPC GradleConfig the bridge
+        // process environment, threaded into the GradleConfig the bridge
         // sends to gradle-server). Mirrors the knobs the VS Code gradle-server
         // applies to its Tooling API connection. Sourced from the LSP `settings`
         // block (the single config source); init options are left empty.
@@ -80,12 +80,7 @@ impl LanguageServer for GradleLsServer {
 
         Ok(zed::Command {
             command: bridge_path,
-            args: vec![
-                java_path,
-                "-cp".to_string(),
-                classpath,
-                "com.microsoft.gradle.GradleLanguageServer".to_string(),
-            ],
+            args: vec![java_path, "-cp".to_string(), classpath],
             env,
         })
     }
@@ -224,7 +219,7 @@ impl LanguageServer for GradleLsServer {
 /// `gradle-lsp-bridge`. The keys mirror the language server's own settings
 /// schema (`gradleUserHome`, `gradleVersion`, `gradleWrapperEnabled`,
 /// `gradleHome`), read from the LSP `settings` block, and are mapped to the
-/// `GRADLE_SYNC_*` variables the bridge reads into the gRPC `GradleConfig` it
+/// `GRADLE_SYNC_*` variables the bridge reads into the `GradleConfig` it
 /// sends to `gradle-server`. `gradle_jvm_arguments` (a string) and the resolved
 /// JDK home are also forwarded if present.
 fn gradle_config_env(
@@ -234,7 +229,7 @@ fn gradle_config_env(
     let mut env = Vec::new();
 
     // The JDK the bridge should ask gradle-server to build with. Threaded into
-    // the gRPC GradleConfig's java_home; mirrors VS Code passing VSCODE_JAVA_HOME.
+    // GradleConfig's java_home; mirrors VS Code passing VSCODE_JAVA_HOME.
     if let Some(java_home) = java_home
         && !java_home.is_empty()
     {
