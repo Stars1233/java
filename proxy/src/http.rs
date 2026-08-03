@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::HashMap,
     io::{BufRead, BufReader, Read, Write},
     sync::{
         atomic::{AtomicU64, Ordering},
-        mpsc, Arc, Mutex,
+        Arc, Mutex,
     },
     time::Duration,
 };
 
+use crate::pending::PendingResponses;
 use proxy_common::encode_lsp;
 
 pub const TIMEOUT: Duration = Duration::from_secs(5);
@@ -31,9 +31,9 @@ struct LspRequest {
 pub fn handle_http(
     mut stream: std::net::TcpStream,
     writer: Arc<Mutex<impl Write>>,
-    pending: Arc<Mutex<HashMap<Value, mpsc::Sender<Value>>>>,
+    pending: Arc<PendingResponses>,
     counter: Arc<AtomicU64>,
-    proxy_id: &str,
+    owned_id_prefix: &str,
 ) {
     let mut reader = BufReader::new(&stream);
 
@@ -78,10 +78,8 @@ pub fn handle_http(
     };
 
     let seq = counter.fetch_add(1, Ordering::Relaxed);
-    let id = Value::String(format!("{proxy_id}-{seq}"));
-
-    let (tx, rx) = mpsc::channel();
-    pending.lock().unwrap().insert(id.clone(), tx);
+    let id = Value::String(format!("{owned_id_prefix}http-{seq}"));
+    let rx = pending.register(id.clone());
 
     let lsp_req = LspRequest {
         jsonrpc: "2.0",
@@ -90,34 +88,45 @@ pub fn handle_http(
         params: req.params,
     };
     let encoded = encode_lsp(&lsp_req);
-    {
+    let request_sent = {
         let mut w = writer.lock().unwrap();
-        let _ = w.write_all(encoded.as_bytes());
-        let _ = w.flush();
-    }
+        w.write_all(encoded.as_bytes()).is_ok() && w.flush().is_ok()
+    };
 
-    let response = match rx.recv_timeout(TIMEOUT) {
-        Ok(resp) => resp,
-        Err(_) => {
-            pending.lock().unwrap().remove(&id);
-            let cancel = encode_lsp(&serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "$/cancelRequest",
-                "params": { "id": id }
-            }));
-            let mut w = writer.lock().unwrap();
-            let _ = w.write_all(cancel.as_bytes());
-            let _ = w.flush();
+    let response = if request_sent {
+        match rx.recv_timeout(TIMEOUT) {
+            Ok(resp) => resp,
+            Err(_) => {
+                pending.remove(&id);
+                let cancel = encode_lsp(&serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "$/cancelRequest",
+                    "params": { "id": id }
+                }));
+                let mut w = writer.lock().unwrap();
+                let _ = w.write_all(cancel.as_bytes());
+                let _ = w.flush();
 
-            serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": {
-                    "code": -32803,
-                    "message": "Request to language server timed out after 5000ms."
-                }
-            })
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {
+                        "code": -32803,
+                        "message": "Request to language server timed out after 5000ms."
+                    }
+                })
+            }
         }
+    } else {
+        pending.remove(&id);
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": -32603,
+                "message": "Failed to write request to language server."
+            }
+        })
     };
 
     let resp_body = serde_json::to_vec(&response).unwrap();

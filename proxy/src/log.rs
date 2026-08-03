@@ -1,7 +1,9 @@
 use serde::Serialize;
-use std::io::{self, Write};
+use std::sync::OnceLock;
 
-use proxy_common::encode_lsp;
+use crate::output::Output;
+
+static OUTPUT: OnceLock<Output> = OnceLock::new();
 
 /// LSP `MessageType` constants as defined in the specification.
 /// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#messageType
@@ -30,8 +32,11 @@ struct LogMessageParams<'a> {
 /// Sends a `window/logMessage` LSP notification to stdout so that Zed
 /// displays the message in its Server Logs panel.
 ///
-/// This locks stdout for the duration of the write to ensure the LSP
-/// framing is not interleaved with other output.
+/// The shared output broker serializes this with every other LSP frame.
+pub fn init(output: Output) {
+    let _ = OUTPUT.set(output);
+}
+
 fn send_log_message(level: u8, message: &str) {
     let notification = LogMessageNotification {
         jsonrpc: "2.0",
@@ -42,12 +47,9 @@ fn send_log_message(level: u8, message: &str) {
         },
     };
 
-    let encoded = encode_lsp(&notification);
-
-    let stdout = io::stdout();
-    let mut w = stdout.lock();
-    let _ = w.write_all(encoded.as_bytes());
-    let _ = w.flush();
+    if let Some(output) = OUTPUT.get() {
+        output.send_value(&notification);
+    }
 }
 
 #[allow(dead_code)]
