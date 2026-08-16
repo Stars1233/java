@@ -158,7 +158,7 @@ impl Downloadable for Lombok {
     const INSTALL_PATH: &'static str = LOMBOK_INSTALL_PATH;
 
     fn find_local(&self) -> Option<PathBuf> {
-        let prefix = PathBuf::from(LOMBOK_INSTALL_PATH);
+        let prefix = get_curr_dir().ok()?.join(LOMBOK_INSTALL_PATH);
         read_dir(&prefix)
             .map(|entries| {
                 entries
@@ -195,17 +195,19 @@ impl Downloadable for Lombok {
         language_server_id: &LanguageServerId,
         _worktree: &Worktree,
     ) -> zed::Result<PathBuf> {
-        let prefix = LOMBOK_INSTALL_PATH;
+        let prefix = get_curr_dir()
+            .map_err(|err| format!("Failed to get extension directory for Lombok: {err}"))?
+            .join(LOMBOK_INSTALL_PATH);
         let jar_name = format!("lombok-{version}.jar");
-        let jar_path = Path::new(prefix).join(&jar_name);
+        let jar_path = prefix.join(&jar_name);
 
         if !metadata(&jar_path).is_ok_and(|stat| stat.is_file()) {
             set_language_server_installation_status(
                 language_server_id,
                 &LanguageServerInstallationStatus::Downloading,
             );
-            create_path_if_not_exists(prefix)
-                .map_err(|err| format!("Failed to create Lombok directory '{prefix}': {err}"))?;
+            create_path_if_not_exists(&prefix)
+                .map_err(|err| format!("Failed to create Lombok directory '{prefix:?}': {err}"))?;
             let download_url = format!("https://projectlombok.org/downloads/{jar_name}");
             download_file(
                 &download_url,
@@ -215,7 +217,7 @@ impl Downloadable for Lombok {
                 DownloadedFileType::Uncompressed,
             )
             .map_err(|err| format!("Failed to download Lombok from {download_url}: {err}"))?;
-            let _ = remove_all_files_except(prefix, jar_name.as_str());
+            let _ = remove_all_files_except(&prefix, jar_name.as_str());
         }
 
         self.cached_path = Some(jar_path.clone());

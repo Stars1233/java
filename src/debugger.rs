@@ -68,7 +68,7 @@ const JAVA_DEBUG_PLUGIN_FORK_URL: &str = "https://github.com/zed-industries/java
 const MAVEN_METADATA_URL: &str = "https://repo1.maven.org/maven2/com/microsoft/java/com.microsoft.java.debug.plugin/maven-metadata.xml";
 
 fn find_latest_local_debugger() -> Option<PathBuf> {
-    let prefix = PathBuf::from(DEBUGGER_INSTALL_PATH);
+    let prefix = get_curr_dir().ok()?.join(DEBUGGER_INSTALL_PATH);
     fs::read_dir(&prefix)
         .map(|entries| {
             entries
@@ -101,11 +101,13 @@ impl Debugger {
         &mut self,
         _language_server_id: &LanguageServerId,
     ) -> zed::Result<PathBuf> {
-        let prefix = "debugger";
+        let prefix = get_curr_dir()
+            .map_err(|err| format!("Failed to get extension directory for debugger: {err}"))?
+            .join(DEBUGGER_INSTALL_PATH);
         let artifact = "com.microsoft.java.debug.plugin";
         let latest_version = "0.53.2";
         let jar_name = format!("{artifact}-{latest_version}.jar");
-        let jar_path = PathBuf::from(prefix).join(&jar_name);
+        let jar_path = prefix.join(&jar_name);
 
         if let Some(path) = &self.plugin_path
             && fs::metadata(path).is_ok_and(|stat| stat.is_file())
@@ -119,8 +121,8 @@ impl Debugger {
             return Ok(jar_path);
         }
 
-        create_path_if_not_exists(prefix)
-            .map_err(|err| format!("Failed to create debugger directory '{prefix}': {err}"))?;
+        create_path_if_not_exists(&prefix)
+            .map_err(|err| format!("Failed to create debugger directory '{prefix:?}': {err}"))?;
 
         download_file(
             JAVA_DEBUG_PLUGIN_FORK_URL,
@@ -146,7 +148,9 @@ impl Debugger {
         &mut self,
         language_server_id: &LanguageServerId,
     ) -> zed::Result<PathBuf> {
-        let prefix = "debugger";
+        let prefix = get_curr_dir()
+            .map_err(|err| format!("Failed to get extension directory for debugger: {err}"))?
+            .join(DEBUGGER_INSTALL_PATH);
 
         if let Some(path) = &self.plugin_path
             && fs::metadata(path).is_ok_and(|stat| stat.is_file())
@@ -168,13 +172,13 @@ impl Debugger {
 
         // Maven loves to be down, trying to resolve it gracefully
         if let Err(err) = &res {
-            if !fs::metadata(prefix).is_ok_and(|stat| stat.is_dir()) {
+            if !fs::metadata(&prefix).is_ok_and(|stat| stat.is_dir()) {
                 return Err(err.to_owned());
             }
 
             println!("Could not fetch debugger: {err}\nFalling back to local version.");
 
-            let exists = fs::read_dir(prefix)
+            let exists = fs::read_dir(&prefix)
                 .ok()
                 .and_then(|dir| dir.last().map(|v| v.ok()))
                 .flatten();
@@ -192,7 +196,7 @@ impl Debugger {
                     return Err(err.to_owned());
                 }
 
-                let jar_path = PathBuf::from(prefix).join(file.file_name());
+                let jar_path = prefix.join(file.file_name());
                 self.plugin_path = Some(jar_path.clone());
 
                 return Ok(jar_path);
@@ -217,10 +221,10 @@ impl Debugger {
         let artifact = "com.microsoft.java.debug.plugin";
 
         let jar_name = format!("{artifact}-{latest_version}.jar");
-        let jar_path = PathBuf::from(prefix).join(&jar_name);
+        let jar_path = prefix.join(&jar_name);
 
         if !fs::metadata(&jar_path).is_ok_and(|stat| stat.is_file()) {
-            if let Err(err) = fs::remove_dir_all(prefix) {
+            if let Err(err) = fs::remove_dir_all(&prefix) {
                 println!("failed to remove directory entry: {err}");
             }
 
@@ -228,7 +232,7 @@ impl Debugger {
                 language_server_id,
                 &LanguageServerInstallationStatus::Downloading,
             );
-            create_path_if_not_exists(prefix)?;
+            create_path_if_not_exists(&prefix)?;
 
             let url = format!(
                 "https://repo1.maven.org/maven2/com/microsoft/java/{artifact}/{latest_version}/{jar_name}"
@@ -376,16 +380,10 @@ impl Debugger {
         &self,
         initialization_options: Option<Value>,
     ) -> zed::Result<Value> {
-        let current_dir = get_curr_dir()
-            .map_err(|err| format!("Failed to get current directory for debugger plugin: {err}"))?;
-
         let canonical_path = Value::String(
-            current_dir
-                .join(
-                    self.plugin_path
-                        .as_ref()
-                        .ok_or("Debugger plugin path not set")?,
-                )
+            self.plugin_path
+                .as_ref()
+                .ok_or("Debugger plugin path not set")?
                 .to_string_lossy()
                 .to_string(),
         );
@@ -449,7 +447,7 @@ impl Downloadable for Debugger {
         worktree: &Worktree,
     ) -> zed::Result<PathBuf> {
         if let Some(jar_path) = self.user_configured_path(configuration, worktree) {
-            let path = PathBuf::from(&jar_path);
+            let path = PathBuf::from(jar_path);
             self.plugin_path = Some(path.clone());
             return Ok(path);
         }
@@ -475,5 +473,46 @@ impl Downloadable for Debugger {
         worktree: &Worktree,
     ) -> Option<String> {
         get_java_debug_jar(configuration, worktree)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn injected_bundle(plugin_path: PathBuf) -> String {
+        let debugger = Debugger {
+            plugin_path: Some(plugin_path),
+        };
+        debugger
+            .inject_plugin_into_options(None)
+            .unwrap()
+            .pointer("/bundles/0")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn managed_debugger_bundle_is_resolved_against_extension_directory() {
+        let plugin_path = get_curr_dir().unwrap().join("debugger/java-debug.jar");
+
+        assert_eq!(
+            injected_bundle(plugin_path),
+            get_curr_dir()
+                .unwrap()
+                .join("debugger/java-debug.jar")
+                .to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn external_debugger_bundle_is_preserved() {
+        let plugin_path = PathBuf::from(r"C:\tools\java-debug.jar");
+
+        assert_eq!(
+            injected_bundle(plugin_path),
+            r"C:\tools\java-debug.jar".to_string()
+        );
     }
 }

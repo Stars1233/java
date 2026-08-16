@@ -74,10 +74,10 @@ impl LanguageServer for JdtlsServer {
                 .lombok
                 .get_or_download(language_server_id, &configuration, worktree)
                 .map_err(|err| format!("Failed to get Lombok jar path: {err}"))?;
-            let canonical_lombok_jar_path = path_to_string(current_dir.join(lombok_jar_path))
+            let lombok_jar_path = path_to_string(lombok_jar_path)
                 .map_err(|err| format!("Failed to convert Lombok jar path to string: {err}"))?;
 
-            Some(format!("-javaagent:{canonical_lombok_jar_path}"))
+            Some(format!("-javaagent:{lombok_jar_path}"))
         } else {
             None
         };
